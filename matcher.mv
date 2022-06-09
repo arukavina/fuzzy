@@ -1,0 +1,256 @@
+#!/usr/bin/python
+# -*- coding: utf-8-*-
+
+# Generic/Built-in
+import os
+import time
+import datetime
+import re
+
+# Other Libs
+import pandas as pd
+import difflib
+from fuzzywuzzy import fuzz
+
+__author__ = 'Andrei Rukavina'
+__copyright__ = 'Copyright 2019'
+__credits__ = ['Andrei Rukavina']
+__license__ = 'MPL 2.0'
+__version__ = '0.0.1'
+__maintainer__ = 'Andrei Rukavina'
+__email__ = 'rukavina.andrei@gmail.com'
+__status__ = 'Dev'
+
+
+TEST = True
+
+INPUT_PATH = u'./data'
+OUTPUT_PATH = u'./data/output'
+
+ORIGIN_FN = u'origen.csv'
+DESTINATION_FN = u'destino.csv'
+RESULT_FN = u'resultado.csv'
+
+SEP = '|'
+
+O_COL_NAME = 'calle'
+D_COL_NAME = 'Calle'
+
+
+def testing_libs():
+
+    # Split Numbers and Text
+    print('Ameghino 421')
+    print(split_numeration('Ameghino 421'))
+    print('Francia 121 Bis')
+    print(split_numeration('Francia 121 Bis'))
+
+    # String Similarity
+    print('String Similarity')
+    m = difflib.SequenceMatcher(None, 'RIVER PLATE', 'Newell\'s Old Boys')
+    print(m.ratio())
+    
+    # Partial String Similarity
+    print('Partial String Similarity')
+    print(fuzz.partial_ratio('PLATE', 'RIVER PLATE'))
+    print(fuzz.partial_ratio('PLATENCE', 'RIVER PLATE'))
+    
+    # Simple Ratio
+    print('Simple Ratio')
+    print(fuzz.ratio('this is a test', 'this is a test!'))
+    
+    # Token Sort Ratio
+    print('Token Sort Ratio')
+    print(fuzz.ratio('fuzzy wuzzy was a bear', 'wuzzy fuzzy was a bear'))
+    print(fuzz.token_sort_ratio('fuzzy wuzzy was a bear', 'wuzzy fuzzy was a bear'))
+    
+    # Token Set Ratio
+    print('Token Set Ratio')
+    print(fuzz.token_sort_ratio('fuzzy was a bear', 'fuzzy fuzzy was a bear'))
+    print(fuzz.token_set_ratio('fuzzy was a bear', 'fuzzy fuzzy was a bear'))
+
+    # Close matches (edit implementation)
+    print('Close matches (edit implementation)')
+    print(difflib.get_close_matches('appel', ['ape', 'apple', 'peach', 'puppy']))
+
+    print('\nEnd of Testing\n')
+
+
+def sequence_matcher(s1, s2):
+    if s1 is None or s2 is None:
+        raise AttributeError
+
+    return difflib.SequenceMatcher(None, s1, s2).ratio()
+
+
+def partial_string_similarity(s1, s2):
+    if s1 is None or s2 is None:
+        raise AttributeError
+
+    return fuzz.partial_ratio(s1, s2)
+
+
+def simple_ratio(s1, s2):
+    if s1 is None or s2 is None:
+        raise AttributeError
+
+    return fuzz.ratio(s1, s2)
+
+
+def _token_sort_ratio(s1, s2):
+    if s1 is None or s2 is None:
+        raise AttributeError
+
+    return fuzz.token_sort_ratio(s1, s2)
+
+
+def token_set_ratio(s1, s2):
+    if s1 is None or s2 is None:
+        raise AttributeError
+
+    return fuzz.token_set_ratio(s1, s2)
+
+
+def close_matches(s, ll):
+    if s is None or ll is None:
+        raise AttributeError('Emtpy String')
+    if len(ll) == 0:
+        raise AttributeError('Empty list')
+
+    return difflib.get_close_matches(s, ll)
+
+
+def sink_files(algorithm, match_df, sequence_df):
+
+    print('\nSaving files...')
+    saving_fn = os.path.join(OUTPUT_PATH, 'backup_' + algorithm + '_' + RESULT_FN)
+    match_fn = os.path.join(OUTPUT_PATH, 'final_' + algorithm + '_' + RESULT_FN)
+    print('Saving backup file to: {}'.format(saving_fn))
+    sequence_df.to_csv(saving_fn, index=False)
+    print('Saving match file to: {}'.format(match_fn))
+    match_df.to_csv(match_fn, index=False)
+
+
+def expand_contractions(s1):
+    # TODO: Map contractions to full words
+    pass
+
+
+def split_numeration(s1):
+    ws = ' '.join(re.findall(r'[a-zA-Z]+', s1))
+    ds = ' '.join(re.findall(r'\d+', s1))
+    return ws, ds
+
+
+def worker(algorithm, dest_df, origin_df, method):
+    sequence_df = None
+    match = []
+
+    if method is None:
+        raise AttributeError('Missing method to call')
+
+    for o, origin in enumerate(origin_df[O_COL_NAME]):
+
+        sequence = []
+        for d, destination in enumerate(dest_df[D_COL_NAME]):
+            sequence.append((o, origin, d, destination, method(origin, destination)))
+
+        df = pd.DataFrame(sequence)
+        df.columns = ['O_Idx', 'Origin', 'D_Idx', 'Destination', 'Algorithm']
+        max_d = float(df['Algorithm'].max())
+        id_d = int(df[['Algorithm']].idxmax())
+
+        print('{} -> {} with score = {}'.format(origin, dest_df.loc[id_d, D_COL_NAME], max_d))
+
+        # Single solution by Origin
+
+        match.append((o, origin, id_d, dest_df.loc[id_d, D_COL_NAME], algorithm, max_d))
+
+        if sequence_df is None:
+            sequence_df = df
+        else:
+            sequence_df = sequence_df.append(df)
+    match_df = pd.DataFrame(match)
+    match_df.columns = ['O_Idx', 'Origin', 'D_Idx', 'Destination', 'Algorithm', 'Score']
+
+    sink_files(algorithm, match_df, sequence_df)
+
+
+def main():
+
+    if TEST:
+        testing_libs()
+
+    dts = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+    print('[{}] Starting'.format(dts))
+
+    print('Reading Data in {}'.format(INPUT_PATH))
+    origin_df = pd.read_csv(os.path.join(INPUT_PATH, ORIGIN_FN), sep=SEP)
+    print('[Origin] {} rows read'.format(origin_df.shape[0]))
+
+    dest_df = pd.read_csv(os.path.join(INPUT_PATH, DESTINATION_FN), sep=SEP)
+    print('[Destination] {} rows read\n'.format(dest_df.shape[0]))
+
+    ##########################################################################################
+
+    algorithm = 'sequence_matcher'
+    print('Processing [{}]\n'.format(algorithm))
+
+    start = time.process_time()
+
+    worker(algorithm, dest_df, origin_df, sequence_matcher)
+
+    print('\nElapsed time: {}\n'.format(time.process_time() - start))
+
+    ##########################################################################################
+
+    algorithm = 'partial_string_similarity'
+    print('Processing [{}]\n'.format(algorithm))
+
+    start = time.process_time()
+
+    worker(algorithm, dest_df, origin_df, partial_string_similarity)
+
+    print('\nElapsed time: {}\n'.format(time.process_time() - start))
+
+    ##########################################################################################
+
+    algorithm = '_token_set_ratio'
+    print('Processing [{}]\n'.format(algorithm))
+
+    start = time.process_time()
+
+    worker(algorithm, dest_df, origin_df, token_set_ratio)
+
+    print('\nElapsed time: {}\n'.format(time.process_time() - start))
+
+    ##########################################################################################
+
+    algorithm = 'token_sort_ratio'
+    print('Processing [{}]\n'.format(algorithm))
+
+    start = time.process_time()
+
+    worker(algorithm, dest_df, origin_df, _token_sort_ratio)
+
+    print('\nElapsed time: {}\n'.format(time.process_time() - start))
+
+    ##########################################################################################
+
+    algorithm = 'simple_ratio'
+    print('Processing [{}]\n'.format(algorithm))
+
+    start = time.process_time()
+
+    worker(algorithm, dest_df, origin_df, simple_ratio)
+
+    print('\nElapsed time: {}\n'.format(time.process_time() - start))
+
+    ##########################################################################################
+
+    dts = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+    print('\n[{}] EoS'.format(dts))
+
+
+if __name__ == '__main__':
+    main()
